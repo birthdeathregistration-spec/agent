@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: trustmart-ai-agent
+    env: python
+    region: singapore
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python agent_server.py
+    autoDeploy: true
+    healthCheckPath: /healthz
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_ALLOWED_USERS
+        value: "7886593741"
+      - key: META_PAGE_ACCESS_TOKEN
+        sync: false
+      - key: META_PAGE_ID
+        value: "1299020649957056"
+      - key: PORT
+        value: "10000"
