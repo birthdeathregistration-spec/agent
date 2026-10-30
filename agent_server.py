@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
 """
-TrustMart 2.0 — 24/7 Autonomous Conversational AI Operations Agent & Web Service
-Adapted from Hermes Agent Architecture for TrustMart E-Commerce.
+TrustMart 2.0 — 24/7 Autonomous Master AI Operations Agent & Web Service
+Engineered with Highest Agentic Powers (Terminal, Shell, Script, File, Store & Social).
 
-Key Capability:
-Understands free-form natural language instructions in Bengali, English, and Banglish
-WITHOUT requiring slash-commands (/combo, /post, etc.), exactly like Antigravity.
+Master Capabilities:
+1. Terminal & Shell Command Execution (run any bash/powershell/cli command, git, pip, curl)
+2. Dynamic Python Script Runner (write and run any script on the fly)
+3. Full File System Control (read, write, list files and directories on server)
+4. Social Media Publishing (Facebook Page auto-posting with Hind Siliguri typography)
+5. Autonomous Product & Combo Management (create bundles, edit prices/stocks)
+6. Store Analytics & Order Reporting (3,243 products, inventory audits)
+7. Free-form Conversational NLU (understands natural Bengali and English without rigid commands)
+8. Render 24/7 Web Server (health checks on $PORT for zero-downtime uptime monitoring)
 """
 
 import os
@@ -14,6 +20,7 @@ import json
 import time
 import re
 import threading
+import subprocess
 import urllib.request
 import urllib.parse
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -118,7 +125,7 @@ def send_telegram_text(chat_id, text):
     if not TELEGRAM_BOT_TOKEN or not chat_id:
         return False
     try:
-        chunks = [text[i:i+4000] for i in range(0, len(text), 4000)]
+        chunks = [text[i:i+3900] for i in range(0, len(text), 3900)]
         for chunk in chunks:
             payload = json.dumps({
                 "chat_id": chat_id,
@@ -146,7 +153,94 @@ def send_telegram_text(chat_id, text):
         except Exception:
             return False
 
-# Agent Tools Definition
+# ==============================================================================
+# HIGHEST POWER AGENT TOOLS (TERMINAL, SCRIPT, FILE SYSTEM, NETWORK)
+# ==============================================================================
+
+def tool_execute_command(command, cwd=None, timeout=60):
+    """Executes arbitrary terminal / shell command and captures live output"""
+    work_dir = cwd or SCRIPT_DIR
+    start = time.time()
+    try:
+        proc = subprocess.run(
+            command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=work_dir,
+            encoding='utf-8',
+            errors='replace'
+        )
+        elapsed = round(time.time() - start, 2)
+        stdout = proc.stdout.strip()
+        stderr = proc.stderr.strip()
+        return {
+            "success": proc.returncode == 0,
+            "returncode": proc.returncode,
+            "stdout": stdout,
+            "stderr": stderr,
+            "time_seconds": elapsed
+        }
+    except subprocess.TimeoutExpired:
+        return {"success": False, "returncode": -1, "error": f"কমান্ডটি {timeout} সেকেন্ডে শেষ হয়নি (টাইমআউট)।"}
+    except Exception as e:
+        return {"success": False, "returncode": -1, "error": str(e)}
+
+def tool_run_python(code, timeout=60):
+    """Executes arbitrary Python script dynamically"""
+    tmp_file = os.path.join(SCRIPT_DIR, f"_agent_exec_{int(time.time())}.py")
+    try:
+        with open(tmp_file, 'w', encoding='utf-8') as f:
+            f.write(code)
+        res = tool_execute_command(f"{sys.executable} \"{tmp_file}\"", timeout=timeout)
+        return res
+    finally:
+        if os.path.exists(tmp_file):
+            try: os.remove(tmp_file)
+            except Exception: pass
+
+def tool_read_file(filepath):
+    """Reads any file from server disk"""
+    target = os.path.abspath(os.path.join(SCRIPT_DIR, filepath))
+    if not os.path.exists(target):
+        return {"success": False, "error": f"ফাইল পাওয়া যায়নি: {filepath}"}
+    try:
+        with open(target, 'r', encoding='utf-8', errors='replace') as f:
+            content = f.read()
+        return {"success": True, "path": target, "content": content, "size_bytes": len(content)}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+def tool_write_file(filepath, content):
+    """Writes content to any file on server disk"""
+    target = os.path.abspath(os.path.join(SCRIPT_DIR, filepath))
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    try:
+        with open(target, 'w', encoding='utf-8') as f:
+            f.write(content)
+        return {"success": True, "path": target, "size_bytes": len(content)}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+def tool_list_directory(dir_path="."):
+    """Lists files in directory"""
+    target = os.path.abspath(os.path.join(SCRIPT_DIR, dir_path))
+    if not os.path.exists(target):
+        return {"success": False, "error": f"ডিরেক্টরি পাওয়া যায়নি: {dir_path}"}
+    try:
+        items = os.listdir(target)
+        file_list = []
+        for it in items[:50]:
+            p = os.path.join(target, it)
+            is_dir = os.path.isdir(p)
+            sz = os.path.getsize(p) if not is_dir else 0
+            file_list.append(f"{'[DIR] ' if is_dir else '      '}{it}{' (' + str(sz) + ' B)' if not is_dir else ''}")
+        return {"success": True, "path": target, "items": file_list}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+# Existing E-Commerce Tools
 def tool_search_catalog(query="", limit=3):
     catalog = get_catalog()
     if not catalog:
@@ -234,17 +328,136 @@ def tool_update_fb_token(token):
         return fb_token_helper.apply_new_fb_token(token)
     return {"success": False, "error": "FB Token helper module missing"}
 
-# Advanced Conversational Natural Language Interpreter (NLU & ReAct Core)
+# ==============================================================================
+# AUTONOMOUS MASTER CONTROLLER (UNDERSTANDS EVERYTHING IN NATURAL LANGUAGE)
+# ==============================================================================
+
 def execute_autonomous_agent(user_prompt, chat_id, user_id):
-    """
-    Executes user requests autonomously WITHOUT requiring slash-commands.
-    Parses intent, extracts entities, triggers tools, and returns natural Bengali responses.
-    """
     raw_text = user_prompt.strip()
     norm_text = normalize_digits(expand_banglish(raw_text))
     low = norm_text.lower()
 
-    # 1. Automatic Facebook Token Detection (User can just paste EAAP... anywhere)
+    # -------------------------------------------------------------------------
+    # HIGHEST POWER 1: DIRECT TERMINAL & SHELL EXECUTION
+    # -------------------------------------------------------------------------
+    is_terminal_intent = False
+    cmd_to_run = ""
+
+    # Direct prefixes ($ ..., run: ..., exec: ..., cmd: ..., কমান্ড: ...)
+    if raw_text.startswith("$ "):
+        is_terminal_intent = True
+        cmd_to_run = raw_text[2:].strip()
+    elif any(raw_text.lower().startswith(p) for p in ["run:", "exec:", "cmd:", "sh:", "bash:", "terminal:", "কমান্ড:", "রান:"]):
+        is_terminal_intent = True
+        cmd_to_run = raw_text.split(":", 1)[1].strip()
+    elif any(low.startswith(p) for p in ["git ", "pip ", "curl ", "python ", "npm ", "node ", "ls", "pwd", "dir", "cat ", "df ", "free ", "uptime", "whoami"]):
+        is_terminal_intent = True
+        cmd_to_run = raw_text.strip()
+    elif any(phrase in low for phrase in ["কমান্ড চালাও", "কমান্ড রান করো", "টার্মিনালে চালাও", "টার্মিনাল কমান্ড", "শেল কমান্ড", "run command", "run this command"]):
+        is_terminal_intent = True
+        # Extract command after colon or quotes or verb
+        if ":" in raw_text:
+            cmd_to_run = raw_text.split(":", 1)[1].strip()
+        elif "`" in raw_text:
+            m = re.search(r'`([^`]+)`', raw_text)
+            if m: cmd_to_run = m.group(1).strip()
+        else:
+            for w in ["কমান্ড চালাও", "কমান্ড রান করো", "রান করো", "চালাও"]:
+                if w in raw_text:
+                    cmd_to_run = raw_text.split(w, 1)[1].strip().strip('"').strip("'")
+                    break
+
+    if is_terminal_intent and cmd_to_run:
+        send_telegram_text(chat_id, f"💻 *টার্মিনালে কমান্ড এক্সিকিউট হচ্ছে...*\n`$ {cmd_to_run}`")
+        res = tool_execute_command(cmd_to_run)
+        code = res.get('returncode', 0)
+        out = res.get('stdout', '')
+        err = res.get('stderr', '')
+        t_sec = res.get('time_seconds', 0)
+
+        status_emoji = "✅" if code == 0 else "❌"
+        msg = f"{status_emoji} *কমান্ড সম্পন্ন ({t_sec}s | Exit Code: {code})*\n\n"
+        if out:
+            # truncate output if too large
+            disp_out = out[:3000] + "\n...(আউটপুট ট্রাঙ্কেট করা হয়েছে)" if len(out) > 3000 else out
+            msg += f"```text\n{disp_out}\n```\n"
+        if err:
+            disp_err = err[:1000]
+            msg += f"⚠️ *Stderr:*\n```text\n{disp_err}\n```"
+        if not out and not err:
+            msg += "_(কোনো কনসোল আউটপুট নেই / নিঃশব্দে সম্পন্ন হয়েছে)_"
+
+        send_telegram_text(chat_id, msg)
+        return
+
+    # -------------------------------------------------------------------------
+    # HIGHEST POWER 2: DYNAMIC PYTHON SCRIPT EXECUTION
+    # -------------------------------------------------------------------------
+    is_python_intent = False
+    py_code = ""
+    if any(raw_text.lower().startswith(p) for p in ["python:", "py:", "script:", "স্ক্রিপ্ট:"]):
+        is_python_intent = True
+        py_code = raw_text.split(":", 1)[1].strip()
+    elif "```python" in raw_text or "```py" in raw_text:
+        is_python_intent = True
+        m = re.search(r'```(?:python|py)?\s*([\s\S]+?)\s*```', raw_text)
+        if m: py_code = m.group(1).strip()
+    elif any(phrase in low for phrase in ["পাইথন স্ক্রিপ্ট চালাও", "পাইথন কোড রান করো", "স্ক্রিপ্ট রান করো", "run python script"]):
+        is_python_intent = True
+        if ":" in raw_text:
+            py_code = raw_text.split(":", 1)[1].strip()
+        elif "`" in raw_text:
+            m = re.search(r'`([^`]+)`', raw_text)
+            if m: py_code = m.group(1).strip()
+
+    if is_python_intent and py_code:
+        send_telegram_text(chat_id, "🐍 *পাইথন স্ক্রিপ্ট এক্সিকিউট হচ্ছে...*")
+        res = tool_run_python(py_code)
+        out = res.get('stdout', '')
+        err = res.get('stderr', '')
+        code = res.get('returncode', 0)
+        t_sec = res.get('time_seconds', 0)
+        status_emoji = "✅" if code == 0 else "❌"
+
+        msg = f"{status_emoji} *স্ক্রিপ্ট রান সম্পন্ন ({t_sec}s)*\n\n"
+        if out:
+            disp_out = out[:3000]
+            msg += f"```text\n{disp_out}\n```\n"
+        if err:
+            msg += f"⚠️ *Error:*\n```text\n{err[:1000]}\n```"
+        if not out and not err:
+            msg += "_(স্ক্রিপ্ট সফলভাবে সম্পন্ন হয়েছে, কোনো আউটপুট ছিল না)_"
+        send_telegram_text(chat_id, msg)
+        return
+
+    # -------------------------------------------------------------------------
+    # HIGHEST POWER 3: FILE SYSTEM (READ, WRITE, LIST)
+    # -------------------------------------------------------------------------
+    if any(low.startswith(p) for p in ["read:", "cat ", "পড়ো:", "ফাইল পড়ো"]):
+        path = raw_text.split(":", 1)[1].strip() if ":" in raw_text else raw_text.split(None, 1)[1].strip()
+        send_telegram_text(chat_id, f"📄 ফাইল পড়া হচ্ছে: `{path}`...")
+        f_res = tool_read_file(path)
+        if f_res.get('success'):
+            content = f_res.get('content', '')
+            disp = content[:3000] + "\n...(আরো বিষয়বস্তু রয়েছে)" if len(content) > 3000 else content
+            send_telegram_text(chat_id, f"📄 *{path}* ({f_res.get('size_bytes')} B):\n\n```text\n{disp}\n```")
+        else:
+            send_telegram_text(chat_id, f"❌ {f_res.get('error')}")
+        return
+
+    if any(low.startswith(p) for p in ["ls", "dir", "ফাইল তালিকা", "ফাইল লিস্ট"]):
+        path = raw_text.split(":", 1)[1].strip() if ":" in raw_text else (raw_text.split(None, 1)[1].strip() if len(raw_text.split()) > 1 else ".")
+        d_res = tool_list_directory(path)
+        if d_res.get('success'):
+            items_str = "\n".join(d_res.get('items', []))
+            send_telegram_text(chat_id, f"📁 *ডিরেক্টরি ফাইল তালিকা ({d_res.get('path')}):*\n\n```text\n{items_str}\n```")
+        else:
+            send_telegram_text(chat_id, f"❌ {d_res.get('error')}")
+        return
+
+    # -------------------------------------------------------------------------
+    # HIGHEST POWER 4: AUTOMATIC FACEBOOK TOKEN DETECTION & EXCHANGER
+    # -------------------------------------------------------------------------
     fb_token_match = re.search(r'(EAAP[A-Za-z0-9]{20,})', raw_text)
     if fb_token_match or "facebook token" in low or "ফেসবুক টোকেন" in low or "fb token" in low:
         if fb_token_match:
@@ -271,12 +484,13 @@ def execute_autonomous_agent(user_prompt, chat_id, user_id):
             ))
             return
 
-    # 2. Marketing Poster & Facebook Publishing (Free-form Natural Language)
+    # -------------------------------------------------------------------------
+    # HIGHEST POWER 5: MARKETING POSTER & SOCIAL PUBLISHING
+    # -------------------------------------------------------------------------
     poster_signals = ['পোস্টার', 'ব্যানার', 'বিজ্ঞাপন', 'পোস্ট', 'ফেসবুকে দাও', 'ফেসবুকে পোস্ট', 'ফেসবুক পোস্ট', 'facebook post', 'poster', 'banner']
     if any(sig in low for sig in poster_signals):
         send_telegram_text(chat_id, "🎨 *পোস্টার ডিজাইন ও সোশ্যাল মিডিয়া পাবলিশিং প্রসেস শুরু হচ্ছে...*\n\n• স্টোর থেকে সেরা বই নির্বাচন\n• ১০৮০x১০৮০ হাই-কনভার্টিং ব্যানার ডিজাইন (হিন্দ শিলিগুড়ি ফন্ট)\n• সেলস কপি রচনা\n• ফেসবুক ও টেলিগ্রামে সরাসরি পাবলিশিং...")
 
-        # Find if specific product or category keyword was requested
         kw = None
         for word in raw_text.split():
             w_clean = re.sub(r'[^\w\s]', '', word).strip()
@@ -300,17 +514,17 @@ def execute_autonomous_agent(user_prompt, chat_id, user_id):
             send_telegram_text(chat_id, f"❌ পোস্টার তৈরিতে সমস্যা: {res.get('error')}")
         return
 
-    # 3. Create Combo / Bundle Offer (Free-form Natural Language)
+    # -------------------------------------------------------------------------
+    # HIGHEST POWER 6: COMBO & PRODUCT MANAGEMENT
+    # -------------------------------------------------------------------------
     combo_signals = ['কম্বো', 'প্যাকেজ', 'বান্ডেল', 'অফার চালু', 'প্যাকেজ অফার', 'combo', 'bundle', 'বানাও কম্বো']
     if any(sig in low for sig in combo_signals):
-        # Extract price
         price = 650
         price_match = re.search(r'(\d+)\s*(টাকা|tk|/-)?', norm_text)
         if price_match:
             try: price = int(price_match.group(1))
             except: pass
 
-        # Extract title
         title = "এক্সক্লুসিভ বুক কম্বো প্যাকেজ"
         if "নাম" in low:
             m = re.search(r'নাম\s*[:=]?\s*([^,।\n]+)', raw_text)
@@ -324,7 +538,6 @@ def execute_autonomous_agent(user_prompt, chat_id, user_id):
                     title = f"{piece} স্পেশাল কম্বো"
                     break
 
-        # Suggest or find items
         items = ["english-therapy", "no-ending"]
         if "সাইন্স" in low or "বিজ্ঞান" in low or "science" in low:
             items = ["higher-math-1st", "physics-1st"]
@@ -340,7 +553,7 @@ def execute_autonomous_agent(user_prompt, chat_id, user_id):
             poster_generator.send_to_telegram(poster, f"🔥 নতুন কম্বো ব্যানার: {title}\nঅফার মূল্য: ৳{price}")
         return
 
-    # 4. Product Price / Stock Edit (Free-form Natural Language)
+    # Product Price / Stock Edit
     has_mod_verb = any(w in low for w in ['এডিট', 'পরিবর্তন', 'করে দাও', 'সেট করো', 'আপডেট করো', 'বাড়িয়ে দাও', 'কমিয়ে দাও', 'change', 'update'])
     has_price_match = re.search(r'(দাম|price|মূল্য)\s*(=|:|\s)?\s*(\d+)', norm_text)
     has_stock_match = re.search(r'(স্টক|stock)\s*(=|:|\s)?\s*(\d+)', norm_text)
@@ -348,7 +561,6 @@ def execute_autonomous_agent(user_prompt, chat_id, user_id):
     if has_mod_verb or (has_price_match and has_stock_match) or (has_price_match and 'টাকা' in low):
         catalog = get_catalog()
         slug = ""
-        # Find matching slug or product name in message
         for p in catalog:
             p_s = p.get('slug', '').lower()
             p_n = p.get('name', '').lower()
@@ -357,7 +569,6 @@ def execute_autonomous_agent(user_prompt, chat_id, user_id):
                 break
 
         if not slug:
-            # Check simple word matching
             for word in raw_text.split():
                 w = word.strip().lower()
                 for p in catalog:
@@ -380,7 +591,9 @@ def execute_autonomous_agent(user_prompt, chat_id, user_id):
             send_telegram_text(chat_id, "⚠️ আপনি মূল্য/স্টক উল্লেখ করেছেন, কিন্তু কোন প্রোডাক্টের পরিবর্তন করতে হবে তার নাম বা স্ল্যাগটি বুঝতে পারিনি। যেমন বলুন: `no-ending এর দাম ১৬০ আর স্টক ২০ করে দাও`।")
             return
 
-    # 5. Store Sales, Analytics & Inventory Status
+    # -------------------------------------------------------------------------
+    # HIGHEST POWER 7: STORE AUDIT, CONSULTING & POLICIES
+    # -------------------------------------------------------------------------
     report_signals = ['কয়টা বই', 'মোট বই', 'স্টক কেমন', 'স্টকের অবস্থা', 'দোকানের হিসেব', 'স্টোর রিপোর্ট', 'মোট সেল', 'আজকের সেল', 'অর্ডার রিপোর্ট', 'হিসেব দাও', 'সেলস রিপোর্ট', 'দোকানের অবস্থা', 'sales']
     if any(sig in low for sig in report_signals):
         catalog = get_catalog()
@@ -390,19 +603,19 @@ def execute_autonomous_agent(user_prompt, chat_id, user_id):
         uptime_mins = int((time.time() - START_TIME) / 60)
 
         rep = (
-            "📊 *TrustMart লাইভ স্টোর অডিট ও অপারেশনাল রিপোর্ট*\n\n"
+            "📊 *TrustMart লাইভ স্টোর অডিট ও মাস্টার অপারেশনাল রিপোর্ট*\n\n"
             f"• মোট রেজিস্টার্ড প্রোডাক্ট: *{total_prods:,}টি*\n"
             f"• ইন-স্টক প্রোডাক্ট: *{in_stock:,}টি*\n"
             f"• স্টক আউট / সীমিত: *{out_of_stock:,}টি*\n"
             f"• ফেসবুক পেজ আইডি: `{META_PAGE_ID}`\n"
             f"• সার্ভার আপটাইম: ২৪/৭ চালু ({uptime_mins} মিনিট ধরে সক্রিয়)\n"
+            f"• টার্মিনাল & স্ক্রিপ্ট এক্সেস: **সক্রিয় (Highest Power Active)**\n"
             f"• অটোনোমাস শিডিউলার: প্রতি ৬ ঘণ্টা পর পর পোস্টার পাবলিশিং\n"
-            f"• ন্যাচারাল ল্যাঙ্গুয়েজ ইঞ্জিন: সক্রিয় (কমান্ড ছাড়া যেকোনো নির্দেশে কাজ করতে সক্ষম)"
+            f"• ন্যাচারাল ল্যাঙ্গুয়েজ ইঞ্জিন: সক্রিয়"
         )
         send_telegram_text(chat_id, rep)
         return
 
-    # 6. Business Consulting, Marketing & Scaling Strategy
     growth_signals = ['সেল বাড়ানো', 'সেলস বাড়া', 'সেল বাড়া', 'সেলস বৃদ্ধি', 'গ্রোথ', 'স্ট্র্যাটেজি', 'কৌশল', 'কী করা উচিত', 'কি করা উচিত', 'পরামর্শ', 'মার্কেটিং বুদ্ধি', 'উন্নতি']
     if any(sig in low for sig in growth_signals):
         advice = (
@@ -419,7 +632,6 @@ def execute_autonomous_agent(user_prompt, chat_id, user_id):
         send_telegram_text(chat_id, advice)
         return
 
-    # 7. Delivery & Shipping Policies
     del_signals = ['ডেলিভারি চার্জ', 'কুরিয়ার চার্জ', 'কবে পাব', 'ডেলিভারি ফি', 'কত দিন লাগবে', 'কুরিয়ার', 'ডেলিভারি']
     if any(sig in low for sig in del_signals):
         del_info = (
@@ -433,7 +645,6 @@ def execute_autonomous_agent(user_prompt, chat_id, user_id):
         send_telegram_text(chat_id, del_info)
         return
 
-    # 8. Payment Policies & Cash on Delivery (COD)
     pay_signals = ['ক্যাশ অন ডেলিভারি', 'cod', 'হাতে পেয়ে টাকা', 'বিকাশ', 'নগদ', 'পেমেন্ট', 'টাকা পরিশোধ']
     if any(sig in low for sig in pay_signals):
         pay_info = (
@@ -445,10 +656,9 @@ def execute_autonomous_agent(user_prompt, chat_id, user_id):
         send_telegram_text(chat_id, pay_info)
         return
 
-    # 9. Book / Product Search & Recommendations
+    # Book search
     search_signals = ['বই আছে', 'পাওয়া যাবে', 'খুঁজছি', 'বইটা আছে', 'দাম কত', 'search', 'খুঁজে দাও', 'বই কি আছে']
     if any(sig in low for sig in search_signals) or len(raw_text.split()) <= 4:
-        # Search catalog
         results = tool_search_catalog(query=raw_text, limit=3)
         if results:
             msg = f"🔍 *আপনার কাঙ্ক্ষিত বইয়ের বিবরণ:*\n\n"
@@ -458,23 +668,25 @@ def execute_autonomous_agent(user_prompt, chat_id, user_id):
             send_telegram_text(chat_id, msg)
             return
 
-    # 10. Pleasantries & Greetings
+    # Pleasantries
     if any(w in low for w in ['সালাম', 'salam', 'assalamu', 'আসসালামু']):
-        send_telegram_text(chat_id, "ওয়ালাইকুম আসসালাম ভাই! TrustMart AI এজেন্টে স্বাগতম। আজকের স্টোর ব্যবস্থাপনা, নতুন ব্যানার পোস্ট, কম্বো তৈরি বা যেকোনো কাজের জন্য আমাকে সাধারণ ভাষায় বলুন—আমি এখনই করে দিচ্ছি।")
+        send_telegram_text(chat_id, "ওয়ালাইকুম আসসালাম ভাই! TrustMart Master AI এজেন্টে স্বাগতম। টার্মিনাল কমান্ড, পাইথন স্ক্রিপ্ট রান, পোস্টার ডিজাইন, ফেসবুক পোস্ট বা যেকোনো অপারেশনের জন্য সাধারণ ভাষায় নির্দেশ দিন।")
         return
     if any(w in low for w in ['কেমন আছ', 'kemon aso', 'kemon achen', 'hello', 'hi', 'হ্যালো', 'ভাই']):
-        send_telegram_text(chat_id, "আলহামদুলিল্লাহ ভাই, সম্পূর্ণ প্রস্তুত ও সক্রিয় আছি! স্টোরে নতুন কোনো পোস্টার বানাতে চান, প্রোডাক্টের দাম/স্টক পরিবর্তন করতে চান নাকি সেলস রিপোর্ট দেখতে চান? সাধারণ ভাষায় বলুন, আমি করে দিচ্ছি।")
+        send_telegram_text(chat_id, "আলহামদুলিল্লাহ ভাই, সম্পূর্ণ রুট ও টার্মিনাল ক্ষমতাসহ সক্রিয় আছি! যেকোনো কমান্ড চালাতে, স্ক্রিপ্ট রান করতে বা ফেসবুক পোস্ট করাতে আমাকে বলুন।")
         return
 
-    # Intelligent Conversational Fallback
+    # Conversational Fallback with Power Guide
     fallback = (
         f"🤖 অ্যাডমিন ভাই, আপনার বার্তা পেয়েছি: '{raw_text}'\n\n"
-        f"আমি আপনার নির্দেশ অনুযায়ী কাজ করতে প্রস্তুত। আপনি কোনো কমান্ড ছাড়াই যেমন বলতে পারেন:\n"
-        f"• *'আজকের সেরা বই নিয়ে একটা পোস্টার ফেসবুকে দিয়ে দাও'*\n"
-        f"• *'৩টি বই দিয়ে ৫০০ টাকার একটা কম্বো অফার বানাও'*\n"
-        f"• *'no-ending বইয়ের দাম ১৮০ টাকা আর স্টক ৩০ করে দাও'*\n"
-        f"• *'আজকে আমাদের দোকানে কয়টা বই আছে হিসেব দাও'*\n"
-        f"• *'সেলস বাড়ানোর উপায় কী?'*"
+        f"সর্বোচ্চ ক্ষমতার অধিকারী এজেন্ট হিসেবে আমি নিচের যেকোনো কাজ সাথে সাথে সম্পন্ন করতে পারি:\n\n"
+        f"💻 *১. টার্মিনাল কমান্ড:* `$ git status` বা `রান করো: pip list`\n"
+        f"🐍 *২. পাইথন স্ক্রিপ্ট:* `python: print(2**10)` বা `স্ক্রিপ্ট চালাও: ...`\n"
+        f"📄 *৩. ফাইল পড়া ও তৈরি:* `read: catalog_seo.json` বা `ls`\n"
+        f"🎨 *৪. ব্যানার ও ফেসবুক পোস্ট:* `একটি সুন্দর পোস্টার বানিয়ে ফেসবুকে দাও`\n"
+        f"📦 *৫. কম্বো তৈরি:* `৩টি বই দিয়ে ৫০০ টাকার কম্বো বানাও`\n"
+        f"✏️ *৬. প্রোডাক্ট এডিট:* `no-ending এর দাম ১৬০ টাকা করে দাও`\n"
+        f"📊 *৭. স্টোর অডিট:* `দোকানের হিসেব দাও`"
     )
     send_telegram_text(chat_id, fallback)
 
@@ -482,6 +694,7 @@ def handle_admin_message(chat_id, user_id, text):
     user_str = str(user_id).strip()
     allowed_str = str(TELEGRAM_ALLOWED_USERS).strip()
 
+    # Security check: Admin only
     if user_str != allowed_str:
         send_telegram_text(chat_id, "⛔ অননুমোদিত এক্সেস!\nএই বট শুধুমাত্র TrustMart এর অথোরাইজড অ্যাডমিন ব্যবহার করতে পারবেন।")
         return
@@ -490,7 +703,7 @@ def handle_admin_message(chat_id, user_id, text):
 
 def telegram_poller():
     """Background polling loop for Telegram Bot updates"""
-    print("✓ Telegram Bot 24/7 Conversational Autonomous Listener started...")
+    print("✓ Telegram Bot 24/7 Master Autonomous Listener started...")
     last_update_id = 0
     while True:
         try:
@@ -531,9 +744,9 @@ class AgentHTTPHandler(BaseHTTPRequestHandler):
             self.end_headers()
             data = {
                 "status": "online",
-                "service": "TrustMart AI Autonomous Agent",
-                "version": "2.1.0",
-                "engine": "Conversational Hermes Autonomous ReAct Architecture",
+                "service": "TrustMart Master AI Autonomous Agent",
+                "version": "2.2.0",
+                "powers": ["terminal_execution", "python_runner", "filesystem_io", "facebook_publisher", "combo_builder", "store_audit"],
                 "commands_required": False,
                 "uptime_seconds": uptime,
                 "mode": "24/7",
@@ -585,8 +798,9 @@ def run_server():
     server_address = ('0.0.0.0', PORT)
     httpd = HTTPServer(server_address, AgentHTTPHandler)
     print("==================================================")
-    print("  TrustMart 24/7 Conversational AI Agent Server  ")
+    print("  TrustMart 24/7 Master AI Autonomous Agent      ")
     print(f"  Listening on http://0.0.0.0:{PORT}              ")
+    print("  HIGHEST AGENTIC POWERS: ACTIVE                 ")
     print("==================================================")
     try:
         httpd.serve_forever()
