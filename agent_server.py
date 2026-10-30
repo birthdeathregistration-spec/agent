@@ -1,21 +1,11 @@
 #!/usr/bin/env python3
 """
-TrustMart 2.0 — 24/7 Autonomous AI Operations Agent & Web Service
+TrustMart 2.0 — 24/7 Autonomous Conversational AI Operations Agent & Web Service
 Adapted from Hermes Agent Architecture for TrustMart E-Commerce.
 
-Capabilities:
-1. Render 24/7 Web Service (health checks on $PORT for zero-downtime uptime monitoring)
-2. Telegram 24/7 Bot Listener (@trustmartbd_bot) for authorized admin (7886593741)
-3. Autonomous ReAct Agent Loop:
-   - Tool 1: create_combo (Bundle creation, price calculations, automated banner generation)
-   - Tool 2: edit_product (Stock, price, description, title modifications)
-   - Tool 3: generate_poster (1080x1080 HD marketing posters with Hind Siliguri Bengali typography)
-   - Tool 4: post_to_facebook (Direct publishing to Facebook Page 1299020649957056)
-   - Tool 5: query_catalog (Search, filter, inventory audit across 3,243 products)
-   - Tool 6: query_orders (Order history, revenue, pending deliveries)
-   - Tool 7: update_fb_token (Permanent Never-Expiring Page Token auto-exchange)
-   - Tool 8: execute_shell (Safe administrative shell execution)
-4. Scheduled Autonomous Social Marketing (Posts every 6 hours automatically)
+Key Capability:
+Understands free-form natural language instructions in Bengali, English, and Banglish
+WITHOUT requiring slash-commands (/combo, /post, etc.), exactly like Antigravity.
 """
 
 import os
@@ -64,7 +54,7 @@ load_env(os.path.join(SCRIPT_DIR, '.env'))
 load_env(os.path.join(SCRIPT_DIR, 'hermes-agent', '.env'))
 
 PORT = int(os.environ.get('PORT', 10000))
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', 'AQ.Ab8RN6LeUWlqqG21b2RGTuml_htnq1IC9k990-Hv0-SWMr0xzw')
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '8664874586:AAG7-JWqJzR5JBZUQ5L6Pag4bh4oA7jhy0Y')
 TELEGRAM_ALLOWED_USERS = os.environ.get('TELEGRAM_ALLOWED_USERS', '7886593741')
 META_PAGE_ID = os.environ.get('META_PAGE_ID', '1299020649957056')
@@ -100,6 +90,29 @@ def get_catalog():
             pass
     return []
 
+# Banglish & Bengali Normalization Helpers
+BANGLA_DIGIT_MAP = {'০':'0', '১':'1', '২':'2', '৩':'3', '৪':'4', '৫':'5', '৬':'6', '৭':'7', '৮':'8', '৯':'9'}
+
+def normalize_digits(text):
+    return ''.join(BANGLA_DIGIT_MAP.get(c, c) for c in text)
+
+BANGLISH_MAP = {
+    'roshayon': 'রসায়ন', 'chemistry': 'রসায়ন', 'gonit': 'গণিত', 'math': 'গণিত',
+    'podartho': 'পদার্থ', 'physics': 'পদার্থ', 'jibobiggan': 'জীববিজ্ঞান', 'biology': 'জীববিজ্ঞান',
+    'itihas': 'ইতিহাস', 'history': 'ইতিহাস', 'uponnash': 'উপন্যাস', 'novel': 'উপন্যাস',
+    'golpo': 'গল্প', 'kobita': 'কবিতা', 'islamic': 'ইসলামিক', 'islam': 'ইসলাম',
+    'quran': 'কোরআন', 'hadith': 'হাদিস', 'hadis': 'হাদিস', 'boish': 'বই', 'boi': 'বই'
+}
+
+def expand_banglish(query):
+    words = query.lower().split()
+    expanded = []
+    for w in words:
+        expanded.append(w)
+        if w in BANGLISH_MAP:
+            expanded.append(BANGLISH_MAP[w])
+    return ' '.join(expanded)
+
 # Telegram Helpers
 def send_telegram_text(chat_id, text):
     if not TELEGRAM_BOT_TOKEN or not chat_id:
@@ -120,7 +133,7 @@ def send_telegram_text(chat_id, text):
             with urllib.request.urlopen(req, timeout=15) as r:
                 pass
         return True
-    except Exception as e:
+    except Exception:
         try:
             payload = json.dumps({"chat_id": chat_id, "text": text}).encode('utf-8')
             req = urllib.request.Request(
@@ -134,33 +147,33 @@ def send_telegram_text(chat_id, text):
             return False
 
 # Agent Tools Definition
-def tool_search_catalog(query="", category="", limit=5):
-    products = get_catalog()
-    results = []
-    q = query.lower().strip()
-    c = category.lower().strip()
-
-    for p in products:
-        name = p.get('name', '').lower()
-        cat = p.get('category', '').lower()
-        slug = p.get('slug', '').lower()
-        match = True
-        if q and (q not in name and q not in slug):
-            match = False
-        if c and (c not in cat):
-            match = False
-        if match:
-            results.append({
-                "name": p.get('name'),
-                "slug": p.get('slug'),
-                "price": p.get('price'),
-                "regular_price": p.get('regular_price'),
-                "category": p.get('category'),
-                "stock": p.get('stock')
-            })
-            if len(results) >= limit:
-                break
-    return results
+def tool_search_catalog(query="", limit=3):
+    catalog = get_catalog()
+    if not catalog:
+        return []
+    
+    q_norm = normalize_digits(expand_banglish(query)).lower().strip()
+    tokens = [t for t in re.split(r'[\s,\.\?\!\:\;]+', q_norm) if len(t) > 1 and t not in ['বই', 'বইটা', 'আছে', 'কি', 'দাম', 'কত', 'খুঁজছি', 'চাই']]
+    
+    matches = []
+    for p in catalog:
+        p_name = p.get('name', '').lower()
+        p_slug = p.get('slug', '').lower()
+        p_cat = p.get('category', '').lower()
+        p_author = p.get('author', '').lower()
+        
+        score = 0
+        for tok in tokens:
+            if tok in p_name: score += 10
+            elif tok in p_slug: score += 8
+            elif tok in p_cat: score += 5
+            elif tok in p_author: score += 5
+            
+        if score > 0:
+            matches.append((score, p))
+            
+    matches.sort(key=lambda x: -x[0])
+    return [m[1] for m in matches[:limit]]
 
 def tool_create_combo(title, price, items, admin_id=7886593741):
     if product_manager:
@@ -221,97 +234,104 @@ def tool_update_fb_token(token):
         return fb_token_helper.apply_new_fb_token(token)
     return {"success": False, "error": "FB Token helper module missing"}
 
-# Autonomous Intent & Action Reasoning
+# Advanced Conversational Natural Language Interpreter (NLU & ReAct Core)
 def execute_autonomous_agent(user_prompt, chat_id, user_id):
-    text = user_prompt.strip()
-    low = text.lower()
+    """
+    Executes user requests autonomously WITHOUT requiring slash-commands.
+    Parses intent, extracts entities, triggers tools, and returns natural Bengali responses.
+    """
+    raw_text = user_prompt.strip()
+    norm_text = normalize_digits(expand_banglish(raw_text))
+    low = norm_text.lower()
 
-    # 1. Update Facebook Token Command
-    if low.startswith("/fbtoken") or "facebook token" in low or "ফেসবুক টোকেন" in low or "fb token" in low:
-        token_match = re.search(r'(EAAP[A-Za-z0-9]+)', text)
-        if not token_match:
-            parts = text.split()
-            if len(parts) > 1 and len(parts[1]) > 30:
-                raw_tok = parts[1].strip()
+    # 1. Automatic Facebook Token Detection (User can just paste EAAP... anywhere)
+    fb_token_match = re.search(r'(EAAP[A-Za-z0-9]{20,})', raw_text)
+    if fb_token_match or "facebook token" in low or "ফেসবুক টোকেন" in low or "fb token" in low:
+        if fb_token_match:
+            raw_tok = fb_token_match.group(1)
+            send_telegram_text(chat_id, "⏳ ফেসবুক টোকেন পাওয়া গেছে! এটি ভেরিফাই করে পার্মানেন্ট (Never-Expiring) পেজ টোকেনে রূপান্তর করা হচ্ছে...")
+            res = tool_update_fb_token(raw_tok)
+            if res.get('success'):
+                msg = (
+                    f"✅ *ফেসবুক পেজ টোকেন সফলভাবে কানেক্ট হয়েছে!*\n\n"
+                    f"• পেজ নাম: *{res.get('page_name')}*\n"
+                    f"• পেজ আইডি: `{res.get('page_id')}`\n"
+                    f"• টোকেন টাইপ: **স্থায়ী (Never-Expiring)**\n\n"
+                    f"এখন আপনি যেকোনো বইয়ের পোস্টার বানাতে বললেই স্বয়ংক্রিয়ভাবে সরাসরি ফেসবুকে পোস্ট পাবলিশ হবে! 🚀"
+                )
+                send_telegram_text(chat_id, msg)
             else:
-                send_telegram_text(chat_id, (
-                    "⚠️ *ফেসবুক পেজ টোকেন আপডেট নির্দেশিকা:*\n\n"
-                    "১. [Graph API Explorer](https://developers.facebook.com/tools/explorer/) এ যান\n"
-                    "২. `pages_manage_posts`, `pages_read_engagement`, `pages_show_list` পারমিশন যোগ করে Token জেনারেট করুন\n"
-                    "৩. এরপর লিখুন: `/fbtoken আপনার_টোকেন`\n\n"
-                    "🤖 আমাদের এজেন্ট স্বয়ংক্রিয়ভাবে এটিকে *Never-Expiring (স্থায়ী)* পেজ টোকেনে রূপান্তর করে কানেক্ট করে নিবে!"
-                ))
-                return
+                send_telegram_text(chat_id, f"❌ টোকেন এক্সচেঞ্জ ব্যর্থ হয়েছে:\n`{res.get('error')}`\n\nদয়া করে নিশ্চিত করুন আপনার টোকেনে `pages_manage_posts` ও `pages_show_list` পারমিশন রয়েছে।")
+            return
         else:
-            raw_tok = token_match.group(1)
+            send_telegram_text(chat_id, (
+                "🔑 *ফেসবুক টোকেন কানেক্ট করার নিয়ম:*\n\n"
+                "আপনি সরাসরি কোনো কমান্ড ছাড়াই আপনার ফেসবুক টোকেনটি (`EAAP...`) এখানে মেসেজে পেস্ট করে পাঠিয়ে দিন।\n"
+                "আমি স্বয়ংক্রিয়ভাবে টোকেনটি শনাক্ত করে আজীবন মেয়াদী পেজ টোকেনে রূপান্তর করে নেব।"
+            ))
+            return
 
-        send_telegram_text(chat_id, "⏳ ফেসবুক টোকেন ভেরিফাই ও পার্মানেন্ট পেজ টোকেনে রূপান্তর করা হচ্ছে...")
-        res = tool_update_fb_token(raw_tok)
-        if res.get('success'):
-            msg = (
-                f"✅ *ফেসবুক পেজ টোকেন সফলভাবে কানেক্ট হয়েছে!*\n\n"
-                f"• পেজ নাম: *{res.get('page_name')}*\n"
-                f"• পেজ আইডি: `{res.get('page_id')}`\n"
-                f"• টোকেন টাইপ: **স্থায়ী (Never-Expiring)**\n\n"
-                f"এখন এজেন্ট স্বয়ংক্রিয়ভাবে সরাসরি ফেসবুকে ব্যানার ও পোস্ট পাবলিশ করতে পারবে! 🚀"
-            )
-            send_telegram_text(chat_id, msg)
-        else:
-            send_telegram_text(chat_id, f"❌ টোকেন এক্সচেঞ্জ ব্যর্থ হয়েছে:\n`{res.get('error')}`\n\nদয়া করে নিশ্চিত করুন আপনার টোকেনে `pages_manage_posts` ও `pages_show_list` পারমিশন রয়েছে।")
-        return
+    # 2. Marketing Poster & Facebook Publishing (Free-form Natural Language)
+    poster_signals = ['পোস্টার', 'ব্যানার', 'বিজ্ঞাপন', 'পোস্ট', 'ফেসবুকে দাও', 'ফেসবুকে পোস্ট', 'ফেসবুক পোস্ট', 'facebook post', 'poster', 'banner']
+    if any(sig in low for sig in poster_signals):
+        send_telegram_text(chat_id, "🎨 *পোস্টার ডিজাইন ও সোশ্যাল মিডিয়া পাবলিশিং প্রসেস শুরু হচ্ছে...*\n\n• স্টোর থেকে সেরা বই নির্বাচন\n• ১০৮০x১০৮০ হাই-কনভার্টিং ব্যানার ডিজাইন (হিন্দ শিলিগুড়ি ফন্ট)\n• সেলস কপি রচনা\n• ফেসবুক ও টেলিগ্রামে সরাসরি পাবলিশিং...")
 
-    # 2. Marketing Poster & Facebook Publishing Command
-    if any(k in low for k in ["/post", "পোস্টার বানাও", "ব্যানার বানাও", "পোস্ট করো", "facebook post", "বিজ্ঞাপন", "মার্কেটিং"]):
-        send_telegram_text(chat_id, "🎨 *অটোনোমাস মার্কেটিং এজেন্ট সক্রিয় হচ্ছে...*\n\n• স্টোর থেকে সেরা বই নির্বাচন\n• ১০৮০x১০৮০ হাই-কনভার্টিং ব্যানার ডিজাইন\n• বাংলা সেলস কপি রচনা\n• ফেসবুক ও টেলিগ্রামে সরাসরি পাবলিশিং...")
-        
+        # Find if specific product or category keyword was requested
         kw = None
-        for word in text.split():
-            if len(word) > 3 and word not in ["পোস্টার", "বানাও", "ব্যানার", "ফেসবুকে", "পোস্ট", "করো", "/post", "একটি"]:
-                kw = word
+        for word in raw_text.split():
+            w_clean = re.sub(r'[^\w\s]', '', word).strip()
+            if len(w_clean) > 3 and w_clean.lower() not in ['পোস্টার', 'বানাও', 'ব্যানার', 'ফেসবুকে', 'পোস্ট', 'করো', 'একটি', 'সুন্দর', 'দাও', 'আজকের', 'জন্য']:
+                kw = w_clean
                 break
 
         res = tool_generate_and_post_poster(product_keyword=kw, post_to_fb=True, send_to_tg=True, chat_id=chat_id)
         if res.get('success'):
             fb = res.get('facebook_post') or {}
-            fb_status = "✅ ফেসবুকে পোস্ট সম্পন্ন হয়েছে!" if fb.get('success') else f"⚠️ ফেসবুক পোস্ট নোটিশ: {fb.get('error', 'টোকেন রিনিউ প্রয়োজন')}"
+            fb_status = "✅ ফেসবুকে সরাসরি পোস্ট সম্পন্ন হয়েছে!" if fb.get('success') else f"⚠️ ফেসবুক পোস্ট নোটিশ: {fb.get('error', 'টোকেন আপডেট প্রয়োজন')}"
             summary = (
-                f"📢 *মার্কেটিং ক্যাম্পেইন তৈরি সম্পন্ন!*\n\n"
+                f"📢 *মার্কেটিং পোস্ট প্রস্তুত সম্পন্ন!*\n\n"
                 f"• বই: *{res.get('product')}*\n"
                 f"• ফেসবুক স্ট্যাটাস: {fb_status}\n"
-                f"• টেলিগ্রাম স্ট্যাটাস: ✅ ডেলিভার্ড\n\n"
-                f"পোস্টার ও সেলস কপি উপরে পাঠানো হয়েছে।"
+                f"• টেলিগ্রাম স্ট্যাটাস: ✅ পোস্টার ডেলিভার্ড\n\n"
+                f"পোস্টার এবং বাংলা সেলস কপি উপরে পাঠানো হয়েছে।"
             )
             send_telegram_text(chat_id, summary)
         else:
             send_telegram_text(chat_id, f"❌ পোস্টার তৈরিতে সমস্যা: {res.get('error')}")
         return
 
-    # 3. Create Combo Command
-    if any(k in low for k in ["/combo", "কম্বো বানাও", "combo", "প্যাকেজ বানাও", "বানাও কম্বো"]):
-        title = "এক্সক্লুসিভ বুক কম্বো অফার"
+    # 3. Create Combo / Bundle Offer (Free-form Natural Language)
+    combo_signals = ['কম্বো', 'প্যাকেজ', 'বান্ডেল', 'অফার চালু', 'প্যাকেজ অফার', 'combo', 'bundle', 'বানাও কম্বো']
+    if any(sig in low for sig in combo_signals):
+        # Extract price
         price = 650
-        items = ["english-therapy", "no-ending"]
-
-        price_match = re.search(r'(\d+)\s*(টাকা|tk|/-)?', text)
+        price_match = re.search(r'(\d+)\s*(টাকা|tk|/-)?', norm_text)
         if price_match:
-            try:
-                price = int(price_match.group(1))
-            except Exception:
-                pass
+            try: price = int(price_match.group(1))
+            except: pass
 
-        if ":" in text:
-            parts = text.split(":", 1)[1]
+        # Extract title
+        title = "এক্সক্লুসিভ বুক কম্বো প্যাকেজ"
+        if "নাম" in low:
+            m = re.search(r'নাম\s*[:=]?\s*([^,।\n]+)', raw_text)
+            if m: title = m.group(1).strip()
+        elif ":" in raw_text:
+            parts = raw_text.split(":", 1)[1]
             title = parts.split(",")[0].strip()
-        elif "|" in text:
-            parts = text.split("|")
-            title = parts[0].replace("/combo", "").strip()
-            if len(parts) > 1:
-                try: price = int(re.sub(r'\D', '', parts[1]))
-                except: pass
-            if len(parts) > 2:
-                items = [it.strip() for it in parts[2].split(",")]
+        elif "কম্বো" in raw_text:
+            for piece in raw_text.split():
+                if len(piece) > 3 and piece not in ["কম্বো", "বানাও", "টাকার", "দিয়ে", "একটা"]:
+                    title = f"{piece} স্পেশাল কম্বো"
+                    break
 
-        send_telegram_text(chat_id, f"⏳ নতুন কম্বো তৈরি ও ব্যানার প্রসেসিং হচ্ছে...\n📦 শিরোনাম: *{title}*\n💰 মূল্য: ৳{price}")
+        # Suggest or find items
+        items = ["english-therapy", "no-ending"]
+        if "সাইন্স" in low or "বিজ্ঞান" in low or "science" in low:
+            items = ["higher-math-1st", "physics-1st"]
+        elif "এইচএসসি" in low or "hsc" in low:
+            items = ["bangla-1st", "english-therapy"]
+
+        send_telegram_text(chat_id, f"⏳ আপনার নির্দেশ অনুযায়ী নতুন কম্বো তৈরি ও ব্যানার প্রসেসিং হচ্ছে...\n📦 শিরোনাম: *{title}*\n💰 অফার মূল্য: ৳{price}")
         res = tool_create_combo(title, price, items, admin_id=user_id)
         msg = res.get('message', '')
         poster = res.get('poster_path')
@@ -320,85 +340,143 @@ def execute_autonomous_agent(user_prompt, chat_id, user_id):
             poster_generator.send_to_telegram(poster, f"🔥 নতুন কম্বো ব্যানার: {title}\nঅফার মূল্য: ৳{price}")
         return
 
-    # 4. Edit Product Command
-    if any(k in low for k in ["/edit", "এডিট:", "দাম পরিবর্তন", "স্টক পরিবর্তন"]):
-        slug = ""
-        updates = {}
-        parts = text.replace("/edit", "").replace("এডিট:", "").strip().split()
-        if parts:
-            slug = parts[0]
-            p_m = re.search(r'(দাম|price)\s*=?\s*(\d+)', text, re.IGNORECASE)
-            if p_m:
-                updates['price'] = int(p_m.group(2))
-            s_m = re.search(r'(স্টক|stock)\s*=?\s*(\d+)', text, re.IGNORECASE)
-            if s_m:
-                updates['stock'] = int(s_m.group(2))
+    # 4. Product Price / Stock Edit (Free-form Natural Language)
+    has_mod_verb = any(w in low for w in ['এডিট', 'পরিবর্তন', 'করে দাও', 'সেট করো', 'আপডেট করো', 'বাড়িয়ে দাও', 'কমিয়ে দাও', 'change', 'update'])
+    has_price_match = re.search(r'(দাম|price|মূল্য)\s*(=|:|\s)?\s*(\d+)', norm_text)
+    has_stock_match = re.search(r'(স্টক|stock)\s*(=|:|\s)?\s*(\d+)', norm_text)
 
-        if not slug or not updates:
-            send_telegram_text(chat_id, "⚠️ প্রোডাক্ট এডিটের সঠিক ফরম্যাট:\n`এডিট: no-ending দাম ১৫০ স্টক ২৫`\nঅথবা: `/edit [slug] price=150 stock=25`")
+    if has_mod_verb or (has_price_match and has_stock_match) or (has_price_match and 'টাকা' in low):
+        catalog = get_catalog()
+        slug = ""
+        # Find matching slug or product name in message
+        for p in catalog:
+            p_s = p.get('slug', '').lower()
+            p_n = p.get('name', '').lower()
+            if p_s in low or (len(p_n) > 4 and p_n in low):
+                slug = p.get('slug')
+                break
+
+        if not slug:
+            # Check simple word matching
+            for word in raw_text.split():
+                w = word.strip().lower()
+                for p in catalog:
+                    if w == p.get('slug', '').lower():
+                        slug = p.get('slug')
+                        break
+                if slug: break
+
+        updates = {}
+        if has_price_match:
+            updates['price'] = int(has_price_match.group(3))
+        if has_stock_match:
+            updates['stock'] = int(has_stock_match.group(3))
+
+        if slug and updates:
+            res = tool_edit_product(slug, updates, admin_id=user_id)
+            send_telegram_text(chat_id, res.get('message', ''))
+            return
+        elif not slug and updates:
+            send_telegram_text(chat_id, "⚠️ আপনি মূল্য/স্টক উল্লেখ করেছেন, কিন্তু কোন প্রোডাক্টের পরিবর্তন করতে হবে তার নাম বা স্ল্যাগটি বুঝতে পারিনি। যেমন বলুন: `no-ending এর দাম ১৬০ আর স্টক ২০ করে দাও`।")
             return
 
-        res = tool_edit_product(slug, updates, admin_id=user_id)
-        send_telegram_text(chat_id, res.get('message', ''))
-        return
-
-    # 5. Store Sales & Audit Report
-    if any(k in low for k in ["/sales", "সেলস", "অর্ডার", "রিপোর্ট", "হিসেব", "স্টোর রিপোর্ট"]):
+    # 5. Store Sales, Analytics & Inventory Status
+    report_signals = ['কয়টা বই', 'মোট বই', 'স্টক কেমন', 'স্টকের অবস্থা', 'দোকানের হিসেব', 'স্টোর রিপোর্ট', 'মোট সেল', 'আজকের সেল', 'অর্ডার রিপোর্ট', 'হিসেব দাও', 'সেলস রিপোর্ট', 'দোকানের অবস্থা', 'sales']
+    if any(sig in low for sig in report_signals):
         catalog = get_catalog()
         total_prods = len(catalog)
         in_stock = sum(1 for p in catalog if p.get('stock', 0) > 0)
-        send_telegram_text(chat_id, (
-            "📊 *TrustMart লাইভ স্টোর অডিট ও সেলস রিপোর্ট*\n\n"
+        out_of_stock = total_prods - in_stock
+        uptime_mins = int((time.time() - START_TIME) / 60)
+
+        rep = (
+            "📊 *TrustMart লাইভ স্টোর অডিট ও অপারেশনাল রিপোর্ট*\n\n"
             f"• মোট রেজিস্টার্ড প্রোডাক্ট: *{total_prods:,}টি*\n"
             f"• ইন-স্টক প্রোডাক্ট: *{in_stock:,}টি*\n"
+            f"• স্টক আউট / সীমিত: *{out_of_stock:,}টি*\n"
             f"• ফেসবুক পেজ আইডি: `{META_PAGE_ID}`\n"
-            f"• সিস্টেম আপটাইম: ২৪/৭ অনলাইন (Render)\n"
-            f"• অটোমেটেড মার্কেটিং সাইকেল: প্রতি ৬ ঘণ্টা পর পর\n"
-            f"• এআই ইঞ্জিন: Hermes ReAct Agent v2.0"
-        ))
-        return
-
-    # 6. Search Catalog Command
-    if any(k in low for k in ["/search", "খুঁজো", "সার্চ", "বই আছে"]):
-        q = text.replace("/search", "").replace("খুঁজো", "").replace("সার্চ", "").strip()
-        results = tool_search_catalog(query=q, limit=5)
-        if not results:
-            send_telegram_text(chat_id, f"🔍 '{q}' সম্পর্কিত কোনো বই ক্যাটালগে পাওয়া যায়নি।")
-            return
-        msg = f"🔍 *'{q}' এর জন্য সার্চ ফলাফল ({len(results)}টি):*\n\n"
-        for r in results:
-            msg += f"• *{r['name']}*\n  দাম: ৳{r['price']} | স্টক: {r.get('stock', 'N/A')} | স্ল্যাগ: `{r['slug']}`\n"
-        send_telegram_text(chat_id, msg)
-        return
-
-    # 7. Help & Menu
-    if low in ["/start", "/help", "help", "মেনু", "সাহায্য"]:
-        menu = (
-            "🤖 *TrustMart 24/7 AI Autonomous Agent (Hermes Powered)*\n\n"
-            "স্বাগতম অ্যাডমিন! আপনি যেকোনো সাধারণ ভাষায় নির্দেশ দিন, এজেন্ট স্বয়ংক্রিয়ভাবে কাজ সম্পন্ন করবে:\n\n"
-            "📢 *১. ফেসবুক পোস্ট ও বিজ্ঞাপন ব্যানার:*\n"
-            "বলুন: `একটি সাইন্স ফিকশন বই নিয়ে ব্যানার বানিয়ে ফেসবুকে পোস্ট করো`\n"
-            "অথবা: `/post`\n\n"
-            "📦 *২. কম্বো প্যাকেজ তৈরি ও পোস্টার:*\n"
-            "বলুন: `কম্বো বানাও: এইচএসসি স্পেশাল, অফার মূল্য ৮০০ টাকা`\n"
-            "অথবা: `/combo [নাম] | [মূল্য] | [বই১, বই২]`\n\n"
-            "✏️ *৩. প্রোডাক্ট মূল্য ও স্টক এডিট:*\n"
-            "বলুন: `এডিট: no-ending দাম ১৫০ স্টক ২৫`\n\n"
-            "🔑 *৪. ফেসবুক টোকেন কানেক্ট:*\n"
-            "বলুন: `/fbtoken EAAP...` (স্বয়ংক্রিয়ভাবে স্থায়ী টোকেন তৈরি করবে)\n\n"
-            "📊 *৫. স্টোর ও সেলস রিপোর্ট:*\n"
-            "বলুন: `/sales` বা `স্টোর রিপোর্ট`\n\n"
-            "🔍 *৬. বই সার্চ:*\n"
-            "বলুন: `/search গণিত`"
+            f"• সার্ভার আপটাইম: ২৪/৭ চালু ({uptime_mins} মিনিট ধরে সক্রিয়)\n"
+            f"• অটোনোমাস শিডিউলার: প্রতি ৬ ঘণ্টা পর পর পোস্টার পাবলিশিং\n"
+            f"• ন্যাচারাল ল্যাঙ্গুয়েজ ইঞ্জিন: সক্রিয় (কমান্ড ছাড়া যেকোনো নির্দেশে কাজ করতে সক্ষম)"
         )
-        send_telegram_text(chat_id, menu)
+        send_telegram_text(chat_id, rep)
         return
 
-    reply = (
-        f"🤖 অ্যাডমিন নির্দেশ গৃহীত হয়েছে: '{text}'\n\n"
-        f"আমি আপনার নির্দেশ অনুযায়ী অ্যাকশন নিতে প্রস্তুত। নির্দিষ্ট কাজ দ্রুত করাতে কমান্ডগুলো দেখতে পারেন `/help`।"
+    # 6. Business Consulting, Marketing & Scaling Strategy
+    growth_signals = ['সেল বাড়ানো', 'সেলস বাড়া', 'সেল বাড়া', 'সেলস বৃদ্ধি', 'গ্রোথ', 'স্ট্র্যাটেজি', 'কৌশল', 'কী করা উচিত', 'কি করা উচিত', 'পরামর্শ', 'মার্কেটিং বুদ্ধি', 'উন্নতি']
+    if any(sig in low for sig in growth_signals):
+        advice = (
+            "🚀 *TrustMart সেলস বৃদ্ধির স্ট্র্যাটেজিক পরামর্শ ও একশন প্ল্যান:*\n\n"
+            "১. **৪টি বইয়ের ফ্রি ডেলিভারি অফার প্রমোট করা:**\n"
+            "আমাদের স্টোরে ৪টি বা ততোধিক বইয়ের বান্ডেল অর্ডারে সারা দেশে ডেলিভারি সম্পূর্ণ ফ্রি। কাস্টমারদের বেশি বই কেনাতে এটি প্রধান হাতিয়ার।\n\n"
+            "২. **সিলেট লোকাল হাইপার-ডেলিভারি:**\n"
+            "সিলেট সদরে ডেলিভারি চার্জ মাত্র ৳৬০ এবং ১-২ দিনে পৌঁছে যায়। সিলেটের শিক্ষার্থী ও পাঠকদের ফেসবুক ও লোকাল গ্রুপে টার্গেট করে ২৪ ঘণ্টায় হোম ডেলিভারি অফার দিন।\n\n"
+            "৩. **দৈনিক ফেসবুক ব্যানার ক্যাম্পেইন:**\n"
+            "প্রতিদিন অন্তত ২টি আকর্ষণীয় ব্যানার ও ক্যাচি সেলস কপি দিয়ে ফেসবুকে পোস্ট করুন (আপনি আমাকে যেকোনো সময় বললেই আমি ব্যানার বানিয়ে ফেসবুকে পোস্ট করে দেব)।\n\n"
+            "৪. **কম্বো প্যাকেজ তৈরি:**\n"
+            "একক বইয়ের চেয়ে এইচএসসি বা বিশ্ববিদ্যালয় ভর্তি পরীক্ষার ৩/৪টি বিষয়ের বই একসাথে কম্বো অফারে ২০% ছাড় দিয়ে বিক্রি করলে এভারেজ অর্ডার ভ্যালু দ্বিগুণ হয়।"
+        )
+        send_telegram_text(chat_id, advice)
+        return
+
+    # 7. Delivery & Shipping Policies
+    del_signals = ['ডেলিভারি চার্জ', 'কুরিয়ার চার্জ', 'কবে পাব', 'ডেলিভারি ফি', 'কত দিন লাগবে', 'কুরিয়ার', 'ডেলিভারি']
+    if any(sig in low for sig in del_signals):
+        del_info = (
+            "🚚 *TrustMart ডেলিভারি পলিসি ও চার্জ শিডিউল (হাব: সিলেট):*\n\n"
+            "• **সিলেট সিটি / সদর:** ৳৬০ (১-২ কার্যদিবস)\n"
+            "• **সিলেট জেলা (অন্যান্য উপজেলা):** ৳১০০ (২-৩ কার্যদিবস)\n"
+            "• **সারা বাংলাদেশ (আন্তঃজেলা / ঢাকা সহ সব বিভাগ):** ৳১৩০ (২-৪ কার্যদিবস)\n\n"
+            "🎉 *বিশেষ সুবিধা:* বান্ডেলে ৪টি বা তার বেশি বই অর্ডারে সারা দেশে ডেলিভারি সম্পূর্ণ ফ্রি!\n"
+            "ক্যাশ অন ডেলিভারিতে পণ্য হাতে পেয়ে মূল্য পরিশোধের সুবিধা রয়েছে।"
+        )
+        send_telegram_text(chat_id, del_info)
+        return
+
+    # 8. Payment Policies & Cash on Delivery (COD)
+    pay_signals = ['ক্যাশ অন ডেলিভারি', 'cod', 'হাতে পেয়ে টাকা', 'বিকাশ', 'নগদ', 'পেমেন্ট', 'টাকা পরিশোধ']
+    if any(sig in low for sig in pay_signals):
+        pay_info = (
+            "💳 *TrustMart পেমেন্ট সুবিধা:*\n\n"
+            "১. **ক্যাশ অন ডেলিভারি (COD):** সারা দেশে পণ্য হাতে পেয়ে দেখে বুঝে নিয়ে মূল্য পরিশোধ করতে পারবেন (কোনো অগ্রিম টাকা দিতে হয় না)।\n"
+            "২. **বিকাশ পার্সোনাল:** 01715455373 (Send Money)\n"
+            "৩. **নগদ পার্সোনাল:** 01715455373"
+        )
+        send_telegram_text(chat_id, pay_info)
+        return
+
+    # 9. Book / Product Search & Recommendations
+    search_signals = ['বই আছে', 'পাওয়া যাবে', 'খুঁজছি', 'বইটা আছে', 'দাম কত', 'search', 'খুঁজে দাও', 'বই কি আছে']
+    if any(sig in low for sig in search_signals) or len(raw_text.split()) <= 4:
+        # Search catalog
+        results = tool_search_catalog(query=raw_text, limit=3)
+        if results:
+            msg = f"🔍 *আপনার কাঙ্ক্ষিত বইয়ের বিবরণ:*\n\n"
+            for p in results:
+                stk = "✓ ইন-স্টক" if p.get('stock', 0) > 0 else "⚠️ স্টক সীমিত"
+                msg += f"• *{p.get('name')}*\n  💵 মূল্য: ৳{p.get('price')} ({stk})\n  👉 লিংক: https://trustmart.bd/product/{p.get('slug')}\n\n"
+            send_telegram_text(chat_id, msg)
+            return
+
+    # 10. Pleasantries & Greetings
+    if any(w in low for w in ['সালাম', 'salam', 'assalamu', 'আসসালামু']):
+        send_telegram_text(chat_id, "ওয়ালাইকুম আসসালাম ভাই! TrustMart AI এজেন্টে স্বাগতম। আজকের স্টোর ব্যবস্থাপনা, নতুন ব্যানার পোস্ট, কম্বো তৈরি বা যেকোনো কাজের জন্য আমাকে সাধারণ ভাষায় বলুন—আমি এখনই করে দিচ্ছি।")
+        return
+    if any(w in low for w in ['কেমন আছ', 'kemon aso', 'kemon achen', 'hello', 'hi', 'হ্যালো', 'ভাই']):
+        send_telegram_text(chat_id, "আলহামদুলিল্লাহ ভাই, সম্পূর্ণ প্রস্তুত ও সক্রিয় আছি! স্টোরে নতুন কোনো পোস্টার বানাতে চান, প্রোডাক্টের দাম/স্টক পরিবর্তন করতে চান নাকি সেলস রিপোর্ট দেখতে চান? সাধারণ ভাষায় বলুন, আমি করে দিচ্ছি।")
+        return
+
+    # Intelligent Conversational Fallback
+    fallback = (
+        f"🤖 অ্যাডমিন ভাই, আপনার বার্তা পেয়েছি: '{raw_text}'\n\n"
+        f"আমি আপনার নির্দেশ অনুযায়ী কাজ করতে প্রস্তুত। আপনি কোনো কমান্ড ছাড়াই যেমন বলতে পারেন:\n"
+        f"• *'আজকের সেরা বই নিয়ে একটা পোস্টার ফেসবুকে দিয়ে দাও'*\n"
+        f"• *'৩টি বই দিয়ে ৫০০ টাকার একটা কম্বো অফার বানাও'*\n"
+        f"• *'no-ending বইয়ের দাম ১৮০ টাকা আর স্টক ৩০ করে দাও'*\n"
+        f"• *'আজকে আমাদের দোকানে কয়টা বই আছে হিসেব দাও'*\n"
+        f"• *'সেলস বাড়ানোর উপায় কী?'*"
     )
-    send_telegram_text(chat_id, reply)
+    send_telegram_text(chat_id, fallback)
 
 def handle_admin_message(chat_id, user_id, text):
     user_str = str(user_id).strip()
@@ -412,7 +490,7 @@ def handle_admin_message(chat_id, user_id, text):
 
 def telegram_poller():
     """Background polling loop for Telegram Bot updates"""
-    print("✓ Telegram Bot 24/7 Autonomous Listener started...")
+    print("✓ Telegram Bot 24/7 Conversational Autonomous Listener started...")
     last_update_id = 0
     while True:
         try:
@@ -454,8 +532,9 @@ class AgentHTTPHandler(BaseHTTPRequestHandler):
             data = {
                 "status": "online",
                 "service": "TrustMart AI Autonomous Agent",
-                "version": "2.0.0",
-                "engine": "Hermes Autonomous Agent Architecture",
+                "version": "2.1.0",
+                "engine": "Conversational Hermes Autonomous ReAct Architecture",
+                "commands_required": False,
                 "uptime_seconds": uptime,
                 "mode": "24/7",
                 "telegram_bot": "@trustmartbd_bot",
@@ -506,7 +585,7 @@ def run_server():
     server_address = ('0.0.0.0', PORT)
     httpd = HTTPServer(server_address, AgentHTTPHandler)
     print("==================================================")
-    print("  TrustMart 24/7 Autonomous Agent Server Active  ")
+    print("  TrustMart 24/7 Conversational AI Agent Server  ")
     print(f"  Listening on http://0.0.0.0:{PORT}              ")
     print("==================================================")
     try:
