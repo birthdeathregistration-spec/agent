@@ -66,7 +66,27 @@ GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '8664874586:AAG7-JWqJzR5JBZUQ5L6Pag4bh4oA7jhy0Y')
 TELEGRAM_ALLOWED_USERS = os.environ.get('TELEGRAM_ALLOWED_USERS', '7886593741')
 META_PAGE_ID = os.environ.get('META_PAGE_ID', '1299020649957056')
+ADMIN_SECRET = os.environ.get('ADMIN_SECRET') or os.environ.get('ADMIN_KEY') or os.environ.get('SMS_WEBHOOK_SECRET') or '748097481bf1b26a3b256cb564b624a3ac6e6943cf0fd0afebd4ff7e96af4113'
 START_TIME = time.time()
+
+def is_shell_command_intent(raw_text):
+    if not raw_text:
+        return False, ""
+    text = str(raw_text).strip()
+    norm = normalize_digits(expand_banglish(text)).lower()
+    if text.startswith("$ "):
+        return True, text[2:].strip()
+    if any(text.lower().startswith(p) for p in ["run:", "exec:", "cmd:", "sh:", "bash:", "terminal:", "কমান্ড:", "রান:"]):
+        return True, text.split(":", 1)[1].strip()
+    if any(norm.startswith(p) for p in ["git ", "pip ", "curl ", "python ", "npm ", "node ", "ls", "pwd", "dir", "cat ", "df ", "free ", "uptime", "whoami"]):
+        return True, text.strip()
+    if any(phrase in norm for phrase in ["কমান্ড চালাও", "কমান্ড রান করো", "টার্মিনালে চালাও", "টার্মিনাল কমান্ড", "শেল কমান্ড", "run command", "run this command"]):
+        return True, text.strip()
+    if any(text.lower().startswith(p) for p in ["python:", "py:", "script:", "স্ক্রিপ্ট:"]) or "```python" in text or "```py" in text:
+        return True, text.strip()
+    if any(phrase in norm for phrase in ["পাইথন স্ক্রিপ্ট চালাও", "পাইথন কোড রান করো", "স্ক্রিপ্ট রান করো", "run python script"]):
+        return True, text.strip()
+    return False, ""
 
 # Import Skill modules safely
 try:
@@ -450,7 +470,7 @@ def call_gemini_brain(prompt, history=None, store_context=None, role="admin"):
 # Returns structured dictionary for both Telegram AND Web Admin Panel
 # ==============================================================================
 
-def execute_autonomous_agent(user_prompt, chat_id=None, user_id="admin", history=None, store_context=None):
+def execute_autonomous_agent(user_prompt, chat_id=None, user_id="admin", history=None, store_context=None, is_admin=False):
     raw_text = user_prompt.strip()
     norm_text = normalize_digits(expand_banglish(raw_text))
     low = norm_text.lower()
@@ -498,6 +518,9 @@ def execute_autonomous_agent(user_prompt, chat_id=None, user_id="admin", history
                     break
 
     if is_terminal_intent and cmd_to_run:
+        if not is_admin:
+            emit("⛔ *অননুমোদিত কমান্ড এক্সেস (403 Forbidden):* শেল কমান্ড চালাতে ভ্যালিড অ্যাডমিন অথেনটিকেশন আবশ্যক।")
+            return {"success": False, "action": "forbidden", "error": "Forbidden: Admin authorization required for shell command execution", "reply": "\n\n".join(replies)}
         emit(f"💻 *টার্মিনালে কমান্ড এক্সিকিউট হচ্ছে...*\n`$ {cmd_to_run}`")
         res = tool_execute_command(cmd_to_run)
         code = res.get('returncode', 0)
@@ -538,6 +561,9 @@ def execute_autonomous_agent(user_prompt, chat_id=None, user_id="admin", history
             if m: py_code = m.group(1).strip()
 
     if is_python_intent and py_code:
+        if not is_admin:
+            emit("⛔ *অননুমোদিত স্ক্রিপ্ট এক্সেস (403 Forbidden):* পাইথন স্ক্রিপ্ট চালাতে ভ্যালিড অ্যাডমিন অথেনটিকেশন আবশ্যক।")
+            return {"success": False, "action": "forbidden", "error": "Forbidden: Admin authorization required for python execution", "reply": "\n\n".join(replies)}
         emit("🐍 *পাইথন স্ক্রিপ্ট এক্সিকিউট হচ্ছে...*")
         res = tool_run_python(py_code)
         out = res.get('stdout', '')
@@ -849,7 +875,7 @@ def handle_admin_message(chat_id, user_id, text):
         send_telegram_text(chat_id, "⛔ অননুমোদিত এক্সেস!\nএই বট শুধুমাত্র TrustMart এর অথোরাইজড অ্যাডমিন ব্যবহার করতে পারবেন।")
         return
 
-    execute_autonomous_agent(text, chat_id=chat_id, user_id=user_id)
+    execute_autonomous_agent(text, chat_id=chat_id, user_id=user_id, is_admin=True)
 
 def telegram_poller():
     """Background polling loop for Telegram Bot updates"""
@@ -889,7 +915,24 @@ class AgentHTTPHandler(BaseHTTPRequestHandler):
     def send_cors_headers(self):
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, x-admin-key')
+
+    def _is_request_admin(self, payload):
+        admin_key = self.headers.get('x-admin-key') or self.headers.get('X-Admin-Key')
+        if admin_key and (admin_key == ADMIN_SECRET or admin_key == os.environ.get('ADMIN_KEY', '')):
+            return True
+
+        auth_header = self.headers.get('Authorization') or self.headers.get('authorization') or ''
+        if auth_header.startswith('Bearer '):
+            token = auth_header[7:].strip()
+            if token and (token == ADMIN_SECRET or token == os.environ.get('ADMIN_KEY', '')):
+                return True
+
+        body_token = (payload or {}).get('admin_key') or (payload or {}).get('token') or (payload or {}).get('admin_token')
+        if body_token and (body_token == ADMIN_SECRET or body_token == os.environ.get('ADMIN_KEY', '')):
+            return True
+
+        return False
 
     def do_OPTIONS(self):
         self.send_response(200)
@@ -941,10 +984,28 @@ class AgentHTTPHandler(BaseHTTPRequestHandler):
             content_length = int(self.headers.get('Content-Length', 0))
             body = self.rfile.read(content_length).decode('utf-8')
             try:
-                payload = json.loads(body)
+                payload = json.loads(body) if body else {}
                 query = payload.get('message') or payload.get('query') or payload.get('prompt') or ''
                 user_id = payload.get('user_id', 'admin_web')
-                res = execute_autonomous_agent(query, chat_id=None, user_id=user_id)
+                role = payload.get('role', '')
+
+                is_admin = self._is_request_admin(payload)
+                if role == 'customer' or str(user_id).startswith('customer'):
+                    is_admin = False
+
+                is_shell, _ = is_shell_command_intent(query)
+                if is_shell and not is_admin:
+                    self.send_response(403)
+                    self.send_cors_headers()
+                    self.send_header('Content-Type', 'application/json; charset=utf-8')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({
+                        "success": False,
+                        "error": "Forbidden: Shell command execution requires valid admin authentication (x-admin-key or ADMIN_SECRET Bearer token)."
+                    }, ensure_ascii=False).encode('utf-8'))
+                    return
+
+                res = execute_autonomous_agent(query, chat_id=None, user_id=user_id, is_admin=is_admin)
                 self.send_response(200)
                 self.send_cors_headers()
                 self.send_header('Content-Type', 'application/json; charset=utf-8')
