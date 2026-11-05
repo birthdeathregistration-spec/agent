@@ -22,9 +22,12 @@ import time
 import re
 import threading
 import subprocess
+import tempfile
 import urllib.request
 import urllib.parse
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+from agent_service_api import (is_admin_request, telegram_webhook_authorized,
+                               proxy_store_action, redact_response)
 from datetime import datetime
 
 # Enforce UTF-8 stdio
@@ -63,10 +66,9 @@ load_env(os.path.join(SCRIPT_DIR, 'hermes-agent', '.env'))
 
 PORT = int(os.environ.get('PORT', 10000))
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
-TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '8664874586:AAG7-JWqJzR5JBZUQ5L6Pag4bh4oA7jhy0Y')
+TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
 TELEGRAM_ALLOWED_USERS = os.environ.get('TELEGRAM_ALLOWED_USERS', '7886593741')
 META_PAGE_ID = os.environ.get('META_PAGE_ID', '1299020649957056')
-ADMIN_SECRET = os.environ.get('ADMIN_SECRET') or os.environ.get('ADMIN_KEY') or os.environ.get('SMS_WEBHOOK_SECRET') or '748097481bf1b26a3b256cb564b624a3ac6e6943cf0fd0afebd4ff7e96af4113'
 START_TIME = time.time()
 
 def is_shell_command_intent(raw_text):
@@ -208,19 +210,35 @@ def tool_execute_command(command, cwd=None, timeout=60):
         return {"success": False, "returncode": -1, "error": str(e)}
 
 def tool_run_python(code, timeout=60):
-    tmp_file = os.path.join(SCRIPT_DIR, f"_agent_exec_{int(time.time())}.py")
+    handle, tmp_file = tempfile.mkstemp(prefix='_agent_exec_', suffix='.py', dir=SCRIPT_DIR)
     try:
-        with open(tmp_file, 'w', encoding='utf-8') as f:
+        with os.fdopen(handle, 'w', encoding='utf-8') as f:
             f.write(code)
-        res = tool_execute_command(f"{sys.executable} \"{tmp_file}\"", timeout=timeout)
+        res = tool_execute_command(f'"{sys.executable}" "{tmp_file}"', timeout=timeout)
         return res
     finally:
         if os.path.exists(tmp_file):
             try: os.remove(tmp_file)
             except Exception: pass
 
+def scoped_file_path(filepath):
+    root = os.path.realpath(SCRIPT_DIR)
+    target = os.path.realpath(os.path.join(root, filepath))
+    if os.path.commonpath([root, target]) != root:
+        raise ValueError('File access must stay inside the agent workspace')
+    parts = os.path.relpath(target, root).replace('\\', '/').split('/')
+    if any(part.startswith('.env') or part in ('.git', '.ssh', 'credentials') for part in parts):
+        raise ValueError('Credential and repository metadata files cannot be accessed')
+    if target.lower().endswith(('.pem', '.key', '.ppk')):
+        raise ValueError('Private key files cannot be accessed')
+    return target
+
+
 def tool_read_file(filepath):
-    target = os.path.abspath(os.path.join(SCRIPT_DIR, filepath))
+    try:
+        target = scoped_file_path(filepath)
+    except ValueError as error:
+        return {'success': False, 'error': str(error)}
     if not os.path.exists(target):
         return {"success": False, "error": f"ফাইল পাওয়া যায়নি: {filepath}"}
     try:
@@ -231,7 +249,10 @@ def tool_read_file(filepath):
         return {"success": False, "error": str(e)}
 
 def tool_write_file(filepath, content):
-    target = os.path.abspath(os.path.join(SCRIPT_DIR, filepath))
+    try:
+        target = scoped_file_path(filepath)
+    except ValueError as error:
+        return {'success': False, 'error': str(error)}
     os.makedirs(os.path.dirname(target), exist_ok=True)
     try:
         with open(target, 'w', encoding='utf-8') as f:
@@ -241,7 +262,10 @@ def tool_write_file(filepath, content):
         return {"success": False, "error": str(e)}
 
 def tool_list_directory(dir_path="."):
-    target = os.path.abspath(os.path.join(SCRIPT_DIR, dir_path))
+    try:
+        target = scoped_file_path(dir_path)
+    except ValueError as error:
+        return {'success': False, 'error': str(error)}
     if not os.path.exists(target):
         return {"success": False, "error": f"ডিরেক্টরি পাওয়া যায়নি: {dir_path}"}
     try:
@@ -285,12 +309,12 @@ def tool_search_catalog(query="", limit=3):
     matches.sort(key=lambda x: -x[0])
     return [m[1] for m in matches[:limit]]
 
-def tool_create_combo(title, price, items, admin_id=7886593741):
+def tool_create_combo(title, price, items, admin_id=None):
     if product_manager:
         return product_manager.create_combo(title, price, items, admin_id=admin_id)
     return {"success": False, "message": "Product manager module missing"}
 
-def tool_edit_product(slug, updates, admin_id=7886593741):
+def tool_edit_product(slug, updates, admin_id=None):
     if product_manager:
         return product_manager.edit_product(slug, updates, admin_id=admin_id)
     return {"success": False, "message": "Product manager module missing"}
@@ -359,7 +383,7 @@ def sanitize_output(text):
     clean = re.sub(r'sk-[A-Za-z0-9]{20,}', '[CONFIDENTIAL_SECRET]', clean)
     clean = re.sub(r'[0-9a-f]{64}', '[CONFIDENTIAL_SECRET]', clean)
     clean = re.sub(r'https://script\.google\.com/macros/s/[A-Za-z0-9_-]+/exec', 'https://trustmart.bd/api', clean)
-    return clean
+    return redact_response(clean)
 
 CREDENTIAL_PROBE_REGEX = re.compile(
     r'(api[ _-]?key|apikey|token|credential|creditian|credital|secret|password|passwd|sheet[ _-]?id|webhook[ _-]?secret|admin pass|access token|এপিআই\s*(কি|কী)|টোকেন|ক্রেডেনশিয়াল|পাসওয়ার্ড|সিক্রেট|ডাটাবেজ)',
@@ -431,6 +455,17 @@ def call_gemini_brain(prompt, history=None, store_context=None, role="admin"):
         "- সর্বদা নিজস্ব বুদ্ধিমত্তা ব্যবহার করে নির্দিষ্ট বিষয়ের সরাসরি, প্রাঞ্জল, আত্মবিশ্বাসী ও প্রফেশনাল উত্তর দিবে।"
     )
 
+    if role == 'customer':
+        system_instruction = (
+            'তুমি TrustMart-এর customer shopping assistant। শুধু পণ্য, অর্ডার করার পদ্ধতি '
+            'ও সিলেট থেকে ডেলিভারি সম্পর্কে সাহায্য করো। কোনো প্রশাসনিক কাজ, ফাইল পড়া, '
+            'মূল্য পরিবর্তন বা social post সম্পন্ন হয়েছে বলে দাবি করবে না। '
+            'অর্ডার বা payment status যাচাই ছাড়া নিশ্চিত করবে না। ' + catalog_summary
+        )
+    elif isinstance(store_context, dict):
+        system_instruction += '\nঅ্যাডমিন ড্যাশবোর্ডের বর্তমান তথ্য:\n' + json.dumps(
+            store_context, ensure_ascii=False)[:20000]
+
     contents = []
     if history and isinstance(history, list):
         for h in history[-6:]:
@@ -470,7 +505,30 @@ def call_gemini_brain(prompt, history=None, store_context=None, role="admin"):
 # Returns structured dictionary for both Telegram AND Web Admin Panel
 # ==============================================================================
 
+def execute_customer_agent(user_prompt, history=None):
+    text = str(user_prompt or '').strip()
+    lower = normalize_digits(expand_banglish(text))
+    blocked = is_shell_command_intent(text)[0] or CREDENTIAL_PROBE_REGEX.search(lower)
+    blocked = blocked or any(lower.startswith(prefix) for prefix in ('read:', 'ফাইল পড়ো', 'পড়ো:', 'write:'))
+    if blocked:
+        return {'success': False, 'action': 'forbidden', 'reply': 'এই কাজের জন্য অ্যাডমিন অনুমতি প্রয়োজন।'}
+    if any(word in lower for word in ('ডেলিভারি', 'delivery', 'কুরিয়ার চার্জ')):
+        return {'success': True, 'action': 'delivery_policy',
+                'reply': 'আমাদের হাব সিলেটে। সিলেট সিটি/সদরে ৳৬০, সিলেট জেলার অন্য এলাকায় ৳১০০, '
+                         'ঢাকাসহ অন্য জেলায় ৳১৩০। চেকআউটে প্রযোজ্য অফারসহ চূড়ান্ত চার্জ দেখাবে।'}
+    products = tool_search_catalog(text, limit=3)
+    if products:
+        reply = '\n\n'.join(f"{product.get('name')} — ৳{product.get('price')}\n"
+                            f"https://trustmart.bd/product/{product.get('slug')}" for product in products)
+        return {'success': True, 'action': 'search', 'reply': reply, 'products': products}
+    reply = call_gemini_brain(text, history=history, role='customer')
+    return {'success': True, 'action': 'customer_support',
+            'reply': reply or 'কোন বই বা পণ্য খুঁজছেন তার নাম লিখুন। অর্ডারের তথ্যের জন্য অর্ডার ট্র্যাকিং পেজ দেখুন।'}
+
+
 def execute_autonomous_agent(user_prompt, chat_id=None, user_id="admin", history=None, store_context=None, is_admin=False):
+    if not is_admin:
+        return execute_customer_agent(user_prompt, history=history)
     raw_text = user_prompt.strip()
     norm_text = normalize_digits(expand_banglish(raw_text))
     low = norm_text.lower()
@@ -695,13 +753,13 @@ def execute_autonomous_agent(user_prompt, chat_id=None, user_id="admin", history
             items = ["bangla-1st", "english-therapy"]
 
         emit(f"⏳ আপনার নির্দেশ অনুযায়ী নতুন কম্বো তৈরি ও ব্যানার প্রসেসিং হচ্ছে...\n📦 শিরোনাম: *{title}*\n💰 অফার মূল্য: ৳{price}")
-        res = tool_create_combo(title, price, items, admin_id=7886593741)
+        res = tool_create_combo(title, price, items, admin_id=str(TELEGRAM_ALLOWED_USERS).split(',')[0].strip())
         msg = res.get('message', '')
         poster = res.get('poster_path')
         emit(msg)
         if poster and os.path.exists(poster) and poster_generator:
             poster_generator.send_to_telegram(poster, f"🔥 নতুন কম্বো ব্যানার: {title}\nঅফার মূল্য: ৳{price}")
-        return {"success": True, "action": "combo", "reply": "\n\n".join(replies), "data": res}
+        return {"success": bool(res.get('success')), "action": "combo", "reply": "\n\n".join(replies), "data": res}
 
     # Product Price / Stock Edit
     has_mod_verb = any(w in low for w in ['এডিট', 'পরিবর্তন', 'করে দাও', 'সেট করো', 'আপডেট করো', 'বাড়িয়ে দাও', 'কমিয়ে দাও', 'change', 'update'])
@@ -734,9 +792,9 @@ def execute_autonomous_agent(user_prompt, chat_id=None, user_id="admin", history
             updates['stock'] = int(has_stock_match.group(3))
 
         if slug and updates:
-            res = tool_edit_product(slug, updates, admin_id=7886593741)
+            res = tool_edit_product(slug, updates, admin_id=str(TELEGRAM_ALLOWED_USERS).split(',')[0].strip())
             emit(res.get('message', ''))
-            return {"success": True, "action": "edit_product", "reply": "\n\n".join(replies), "data": res}
+            return {"success": bool(res.get('success')), "action": "edit_product", "reply": "\n\n".join(replies), "data": res}
         elif not slug and updates:
             emit("⚠️ আপনি মূল্য/স্টক উল্লেখ করেছেন, কিন্তু কোন প্রোডাক্টের পরিবর্তন করতে হবে তার নাম বা স্ল্যাগটি বুঝতে পারিনি। যেমন বলুন: `no-ending এর দাম ১৬০ আর স্টক ২০ করে দাও`।")
             return {"success": False, "action": "edit_product", "reply": "\n\n".join(replies)}
@@ -871,7 +929,7 @@ def handle_admin_message(chat_id, user_id, text):
     user_str = str(user_id).strip()
     allowed_str = str(TELEGRAM_ALLOWED_USERS).strip()
 
-    if user_str != allowed_str:
+    if user_str not in {value.strip() for value in allowed_str.split(',') if value.strip()}:
         send_telegram_text(chat_id, "⛔ অননুমোদিত এক্সেস!\nএই বট শুধুমাত্র TrustMart এর অথোরাইজড অ্যাডমিন ব্যবহার করতে পারবেন।")
         return
 
@@ -913,26 +971,32 @@ def scheduled_campaign_loop():
 
 class AgentHTTPHandler(BaseHTTPRequestHandler):
     def send_cors_headers(self):
-        self.send_header('Access-Control-Allow-Origin', '*')
+        origin = self.headers.get('Origin', '')
+        allowed = {os.environ.get('SITE_URL', 'https://trustmart.bd').rstrip('/'), 'https://www.trustmart.bd'}
+        if origin in allowed:
+            self.send_header('Access-Control-Allow-Origin', origin)
+            self.send_header('Vary', 'Origin')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, x-admin-key')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, x-admin-key, X-Webhook-Secret, X-Signature')
 
     def _is_request_admin(self, payload):
-        admin_key = self.headers.get('x-admin-key') or self.headers.get('X-Admin-Key')
-        if admin_key and (admin_key == ADMIN_SECRET or admin_key == os.environ.get('ADMIN_KEY', '')):
-            return True
+        return is_admin_request(self.headers, payload)
 
-        auth_header = self.headers.get('Authorization') or self.headers.get('authorization') or ''
-        if auth_header.startswith('Bearer '):
-            token = auth_header[7:].strip()
-            if token and (token == ADMIN_SECRET or token == os.environ.get('ADMIN_KEY', '')):
-                return True
+    def send_json(self, status, payload):
+        self.send_response(status)
+        self.send_cors_headers()
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.end_headers()
+        self.wfile.write(json.dumps(redact_response(payload), ensure_ascii=False).encode('utf-8'))
 
-        body_token = (payload or {}).get('admin_key') or (payload or {}).get('token') or (payload or {}).get('admin_token')
-        if body_token and (body_token == ADMIN_SECRET or body_token == os.environ.get('ADMIN_KEY', '')):
-            return True
-
-        return False
+    def read_json(self):
+        length = int(self.headers.get('Content-Length', '0'))
+        if not 0 < length <= 1024 * 1024:
+            raise ValueError('Request body must be between 1 byte and 1 MB')
+        payload = json.loads(self.rfile.read(length).decode('utf-8'))
+        if not isinstance(payload, dict):
+            raise ValueError('Expected a JSON object')
+        return payload
 
     def do_OPTIONS(self):
         self.send_response(200)
@@ -940,8 +1004,9 @@ class AgentHTTPHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
+        path = urllib.parse.urlsplit(self.path).path.rstrip('/') or '/'
         uptime = int(time.time() - START_TIME)
-        if self.path in ['/', '/healthz', '/health']:
+        if path in ['/', '/healthz', '/health']:
             self.send_response(200)
             self.send_cors_headers()
             self.send_header('Content-Type', 'application/json; charset=utf-8')
@@ -960,7 +1025,7 @@ class AgentHTTPHandler(BaseHTTPRequestHandler):
                 "server_time": datetime.now().isoformat()
             }
             self.wfile.write(json.dumps(data, indent=2).encode('utf-8'))
-        elif self.path in ['/api/poster/latest', '/poster.jpg']:
+        elif path in ['/api/poster/latest', '/poster.jpg']:
             poster_path = os.path.join(SCRIPT_DIR, 'trustmart_daily_poster.jpg')
             if os.path.exists(poster_path):
                 self.send_response(200)
@@ -980,86 +1045,68 @@ class AgentHTTPHandler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def do_POST(self):
-        if self.path in ['/api/copilot', '/api/agent-command']:
-            content_length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(content_length).decode('utf-8')
-            try:
-                payload = json.loads(body) if body else {}
-                query = payload.get('message') or payload.get('query') or payload.get('prompt') or ''
-                user_id = payload.get('user_id', 'admin_web')
-                role = payload.get('role', '')
-
-                is_admin = self._is_request_admin(payload)
-                if role == 'customer' or str(user_id).startswith('customer'):
-                    is_admin = False
-
-                is_shell, _ = is_shell_command_intent(query)
-                if is_shell and not is_admin:
-                    self.send_response(403)
-                    self.send_cors_headers()
-                    self.send_header('Content-Type', 'application/json; charset=utf-8')
-                    self.end_headers()
-                    self.wfile.write(json.dumps({
-                        "success": False,
-                        "error": "Forbidden: Shell command execution requires valid admin authentication (x-admin-key or ADMIN_SECRET Bearer token)."
-                    }, ensure_ascii=False).encode('utf-8'))
-                    return
-
-                res = execute_autonomous_agent(query, chat_id=None, user_id=user_id, is_admin=is_admin)
-                self.send_response(200)
-                self.send_cors_headers()
-                self.send_header('Content-Type', 'application/json; charset=utf-8')
-                self.end_headers()
-                self.wfile.write(json.dumps(res, ensure_ascii=False).encode('utf-8'))
-            except Exception as e:
-                self.send_response(500)
-                self.send_cors_headers()
-                self.send_header('Content-Type', 'application/json')
-                self.end_headers()
-                self.wfile.write(json.dumps({"success": False, "error": str(e)}).encode('utf-8'))
-
-        elif self.path == '/api/trigger-poster':
-            if poster_generator:
-                threading.Thread(target=poster_generator.run_daily_poster_campaign, daemon=True).start()
-                self.send_response(200)
-                self.send_cors_headers()
-                self.send_header('Content-Type', 'application/json')
-                self.end_headers()
-                self.wfile.write(b'{"status": "campaign_triggered"}')
-            else:
-                self.send_response(500)
-                self.send_cors_headers()
-                self.end_headers()
-                self.wfile.write(b'{"error": "poster_generator_missing"}')
-
-        elif self.path == '/webhook/telegram':
-            content_length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(content_length).decode('utf-8')
-            try:
-                update = json.loads(body)
-                msg = update.get('message')
-                if msg and 'text' in msg:
-                    handle_admin_message(msg['chat']['id'], msg['from']['id'], msg['text'])
-            except Exception as e:
-                print(f"Webhook parse error: {e}")
-            self.send_response(200)
-            self.send_cors_headers()
-            self.end_headers()
-            self.wfile.write(b'{"ok": true}')
+        path = urllib.parse.urlsplit(self.path).path.rstrip('/')
+        if path == '/webhook/telegram' and not telegram_webhook_authorized(self.headers):
+            self.send_json(403, {"success": False, "error": "Unauthorized webhook"})
+            return
+        try:
+            payload = self.read_json()
+        except (ValueError, UnicodeError):
+            self.send_json(400, {"success": False, "error": "Invalid JSON request body"})
+            return
+        if path in ('/api/payments/verify', '/api/payments/webhook', '/api/courier/steadfast-webhook'):
+            status, result = proxy_store_action(path, payload, self.headers)
+            self.send_json(status, result)
+        elif path in ('/api/copilot', '/api/agent-command'):
+            query = payload.get('message') or payload.get('query') or payload.get('prompt') or ''
+            if not isinstance(query, str) or not query.strip() or len(query) > 16000:
+                self.send_json(400, {"success": False, "error": "A message of at most 16000 characters is required"})
+                return
+            customer = payload.get('role') == 'customer' or str(payload.get('user_id', '')).startswith('customer')
+            admin = False if customer else self._is_request_admin(payload)
+            if not customer and not admin:
+                self.send_json(403, {"success": False, "error": "Valid admin authentication is required"})
+                return
+            history = payload.get('history')
+            if history is not None and (not isinstance(history, list) or len(history) > 20 or
+                    any(not isinstance(item, dict) or not isinstance(item.get('text', ''), str)
+                        for item in history)):
+                self.send_json(400, {"success": False, "error": "Invalid conversation history"})
+                return
+            result = execute_autonomous_agent(query, user_id=payload.get('user_id', 'admin_web'),
+                                              history=history, store_context=payload.get('storeContext'), is_admin=admin)
+            self.send_json(200, result)
+        elif path == '/api/trigger-poster':
+            if not self._is_request_admin(payload):
+                self.send_json(403, {"success": False, "error": "Admin authentication required"})
+                return
+            if not poster_generator:
+                self.send_json(503, {"success": False, "error": "Poster generator unavailable"})
+                return
+            threading.Thread(target=poster_generator.run_daily_poster_campaign, daemon=True).start()
+            self.send_json(202, {"success": True, "status": "campaign_triggered"})
+        elif path == '/webhook/telegram':
+            msg = payload.get('message')
+            if isinstance(msg, dict) and isinstance(msg.get('text'), str):
+                sender = msg.get('from') or {}
+                chat = msg.get('chat') or {}
+                if 'id' in sender and 'id' in chat:
+                    handle_admin_message(chat['id'], sender['id'], msg['text'])
+            self.send_json(200, {"ok": True})
         else:
-            self.send_response(404)
-            self.send_cors_headers()
-            self.end_headers()
+            self.send_json(404, {"success": False, "error": "Not found"})
+
 
 def run_server():
-    t_tele = threading.Thread(target=telegram_poller, daemon=True)
-    t_tele.start()
+    if not os.environ.get('TELEGRAM_WEBHOOK_SECRET', ''):
+        t_tele = threading.Thread(target=telegram_poller, daemon=True)
+        t_tele.start()
 
     t_sched = threading.Thread(target=scheduled_campaign_loop, daemon=True)
     t_sched.start()
 
     server_address = ('0.0.0.0', PORT)
-    httpd = HTTPServer(server_address, AgentHTTPHandler)
+    httpd = ThreadingHTTPServer(server_address, AgentHTTPHandler)
     print("==================================================")
     print("  TrustMart 24/7 Master AI Autonomous Agent      ")
     print(f"  Listening on http://0.0.0.0:{PORT}              ")

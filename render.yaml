@@ -17,6 +17,20 @@ services:
         value: "7886593741"
       - key: META_PAGE_ACCESS_TOKEN
         sync: false
+      - key: SCRIPT_URL
+        sync: false
+      - key: AGENT_SERVICE_SECRET
+        sync: false
+      - key: ADMIN_SECRET
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
+      - key: SMS_WEBHOOK_SECRET
+        sync: false
+      - key: STEADFAST_WEBHOOK_TOKEN
+        sync: false
+      - key: SITE_URL
+        value: "https://trustmart.bd"
       - key: META_PAGE_ID
         value: "1299020649957056"
       - key: PORT
